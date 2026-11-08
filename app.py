@@ -872,6 +872,9 @@ if page == 'Overview':
     with st.container(border=True):
         st.subheader('Bin fill by location and type')
         render_bin_cards(b, 'overview_bins')
+        if st.button('＋ Add a new bin', key='overview_add_bin', type='primary', use_container_width=True):
+            st.query_params['nav'] = 'Bin network'
+            st.rerun()
     total_volume = pd.to_numeric(logs.get('Volume (L)', pd.Series(dtype=float)), errors='coerce').fillna(0).sum() if not logs.empty else 0
     dry_e_records = int(logs['Category'].astype(str).isin(['Dry', 'E-waste']).sum()) if not logs.empty else 0
     dry_e_volume = pd.to_numeric(logs.loc[logs['Category'].astype(str).isin(['Dry', 'E-waste']), 'Volume (L)'], errors='coerce').fillna(0).sum() if not logs.empty else 0
@@ -1101,6 +1104,19 @@ elif page == 'Live sorting':
                 st.error('Add a bin first.')
 elif page == 'Bin network':
     header('Bin network', 'Register, Edit, and Remove individual tracked bins.', 'NETWORK MANAGEMENT')
+    with st.form('addbin'):
+        st.subheader('Add a bin')
+        a, c, d, e = st.columns(4)
+        name = a.text_input('Bin name')
+        zone = c.text_input('Zone')
+        cat = d.selectbox('Waste category', TYPES)
+        cap = e.number_input('Capacity (L)', min_value=1.0, value=100.0)
+        if st.form_submit_button('＋ Add to network', use_container_width=True) and name.strip():
+            new_id = next_bin_id(st.session_state.bins)
+            st.session_state.bins.loc[len(st.session_state.bins)] = {'Bin ID': new_id, 'Name': name.strip(), 'Zone': zone.strip(), 'Category': cat, 'Capacity (L)': cap, 'Fill (L)': 0.0, 'Status': 'Online'}
+            save()
+            st.success(f'Added {new_id} to the network.')
+            st.rerun()
     with st.container(border=True):
         st.subheader(f'Registered Bins · {len(b)}')
         edit = st.data_editor(b, hide_index=True, use_container_width=True, num_rows='fixed', column_config={'Category': st.column_config.SelectboxColumn(options=TYPES), 'Capacity (L)': st.column_config.NumberColumn(min_value=1), 'Fill (L)': st.column_config.NumberColumn(min_value=0), 'Status': st.column_config.SelectboxColumn(options=['Online', 'Offline', 'Maintenance'])}, key='bin_edit')
@@ -1117,20 +1133,6 @@ elif page == 'Bin network':
             st.session_state.bins = b[b['Bin ID'].astype(str) != remove].reset_index(drop=True)
             save()
             st.rerun()
-    with st.form('addbin'):
-        st.subheader('Add a bin')
-        a, c, d, e = st.columns(4)
-        name = a.text_input('Bin name')
-        zone = c.text_input('Zone')
-        cat = d.selectbox('Waste category', TYPES)
-        cap = e.number_input('Capacity (L)', min_value=1.0, value=100.0)
-        if st.form_submit_button('＋ Add to network', use_container_width=True) and name.strip():
-            new_id = next_bin_id(st.session_state.bins)
-            st.session_state.bins.loc[len(st.session_state.bins)] = {'Bin ID': new_id, 'Name': name.strip(), 'Zone': zone.strip(), 'Category': cat, 'Capacity (L)': cap, 'Fill (L)': 0.0, 'Status': 'Online'}
-            save()
-            st.success(f'Added {new_id} to the network.')
-            st.rerun()
-    st.caption('')
 elif page == 'Monitor & trends':
     header('Monitor & trends', 'Compare recent sorting activity and identify the next useful action.', 'OPERATIONS INTELLIGENCE')
     pct = (pd.to_numeric(b['Fill (L)'], errors='coerce').fillna(0) / pd.to_numeric(b['Capacity (L)'], errors='coerce').replace(0, pd.NA) * 100).fillna(0).clip(0, 100) if not b.empty else pd.Series(dtype=float)
