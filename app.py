@@ -126,6 +126,25 @@ def show_auth_gate():
             st.error(f'Authentication failed: {str(exc)[:240]}')
     st.stop()
 
+def render_intro_splash():
+    """Show a short branded opening overlay once per Streamlit session."""
+    if st.session_state.get('intro_splash_shown'):
+        return
+    st.session_state.intro_splash_shown = True
+    st.markdown("""<style>
+    .circular-intro{position:fixed;inset:0;z-index:999999;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 50%,#1b332b 0%,#13241f 44%,#0a1512 100%);animation:circular-intro-out 2.8s ease forwards;pointer-events:none}
+    .circular-intro-content{text-align:center;transform:translateY(-1vh)}
+    .circular-intro-logo{display:block;color:#b5d968;font-family:Arial,sans-serif;font-size:86px;line-height:1;text-shadow:0 0 34px #a7cc5a55;animation:circular-intro-spin 1.7s linear infinite}
+    .circular-intro-name{margin-top:35px;color:#f1f5f1;font:600 46px/1.1 'DM Sans',Arial,sans-serif;letter-spacing:.01em}
+    .circular-intro-tagline{margin-top:17px;color:#75907e;font:700 15px/1.4 'DM Sans',Arial,sans-serif;letter-spacing:.22em}
+    @keyframes circular-intro-spin{to{transform:rotate(360deg)}}
+    @keyframes circular-intro-out{0%,78%{opacity:1;visibility:visible}100%{opacity:0;visibility:hidden}}
+    @media(max-width:600px){.circular-intro-logo{font-size:72px}.circular-intro-name{font-size:38px}.circular-intro-tagline{font-size:11px;letter-spacing:.16em}}
+    @media(prefers-reduced-motion:reduce){.circular-intro{animation-duration:.5s}.circular-intro-logo{animation-duration:4s}}
+    </style>""", unsafe_allow_html=True)
+    st.markdown('<div class="circular-intro" aria-label="Circular loading"><div class="circular-intro-content"><span class="circular-intro-logo">♻</span><div class="circular-intro-name">Circular</div><div class="circular-intro-tagline">SMARTER SORTING · CLEANER CAMPUS</div></div></div>', unsafe_allow_html=True)
+
+render_intro_splash()
 current_user = show_auth_gate()
 USER_ID = current_user['id']
 DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite'
