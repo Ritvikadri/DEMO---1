@@ -42,11 +42,24 @@ def get_supabase_client():
         client.postgrest.auth(token)
     return client
 
+def build_auth_user(user, fallback_email=''):
+    'Keep the signed-in profile fields in a consistent shape.'
+    metadata = getattr(user, 'user_metadata', None) or {}
+    email = getattr(user, 'email', None) or fallback_email
+    return {
+        'id': str(user.id),
+        'email': email,
+        'name': metadata.get('full_name') or (email.split('@')[0] if email else ''),
+        'phone': metadata.get('phone') or '',
+        'campus_area': metadata.get('campus_area') or '',
+        'metadata': metadata,
+        'created_at': getattr(user, 'created_at', None),
+    }
+
 def show_auth_gate():
     client = get_supabase_client()
     user = st.session_state.get('auth_user')
     if user:
-        st.sidebar.caption(f"Signed in: {user['email']}")
         return user
     st.markdown('''<style>
     :root{color-scheme:dark;--primary-color:#f2b138;--background-color:#0a1514;--secondary-background-color:#111f1d;--text-color:#e9f0ed}
@@ -54,11 +67,16 @@ def show_auth_gate():
     [data-testid="stMainBlockContainer"]{max-width:900px;padding-top:7vh}
     .circ-auth-title{text-align:center;margin:0 auto 16px;padding:30px 28px 22px;border:1px solid #6fd3b044;border-radius:24px;background:linear-gradient(145deg,#172a27ee,#0c1816ee);box-shadow:0 24px 70px -42px #6fd3b066}
     .circ-auth-title h1{font-size:clamp(2rem,5vw,3.2rem)!important;font-weight:800!important;color:#f4f7f5!important;margin:0!important}.circ-auth-title p{font-size:1.05rem;color:#a6bbb4;margin:9px 0 0}
+    .circ-logo-wrap{height:78px;width:78px;margin:0 auto 12px;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle,#183d30,#10231e);border:1px solid #6fd3b077;box-shadow:0 0 36px #6fd3b033;animation:circ-logo-float 2.4s ease-in-out infinite}
+    .circ-logo{font-size:48px;line-height:1;display:block;animation:circ-logo-spin 3.2s cubic-bezier(.45,0,.55,1) infinite;transform-origin:center}
+    .circ-tagline{margin-top:13px;color:#9ce0b0;font-size:.76rem!important;font-weight:800;letter-spacing:.19em;text-transform:uppercase}
+    @keyframes circ-logo-spin{0%{transform:rotate(0)}55%{transform:rotate(210deg)}100%{transform:rotate(360deg)}}@keyframes circ-logo-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
     div[data-testid="stForm"]{max-width:620px;margin:16px auto;padding:26px 28px;border:1px solid #6fd3b044;border-radius:22px;background:linear-gradient(145deg,#172a27ee,#0c1816ee);box-shadow:0 24px 70px -48px #6fd3b055}
     div[data-testid="stForm"] label{color:#e7efec;font-weight:600}div[data-testid="stForm"] input{color:#f4f7f5;background:#172a27;border-color:#25413d;color-scheme:dark}
     div[data-testid="stForm"] .stFormSubmitButton>button{width:100%;min-height:54px;border:0;border-radius:14px;color:#12332f;background:linear-gradient(135deg,#ffd45c,#f2b138);font-size:1.08rem;font-weight:800}
+    @media(prefers-reduced-motion:reduce){.circ-logo,.circ-logo-wrap{animation:none!important}}
     </style>''', unsafe_allow_html=True)
-    st.markdown('<div class="circ-auth-title"><div style="font-size:2.6rem">♻</div><h1>Welcome to Circular</h1><p>Sign in or create an account to manage your campus circularly.</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="circ-auth-title"><div class="circ-logo-wrap"><span class="circ-logo">♻</span></div><h1>Welcome to Circular</h1><p>Sign in or create an account to manage your campus circularly.</p><div class="circ-tagline">SMARTER SORTING · CLEANER CAMPUS</div></div>', unsafe_allow_html=True)
     st.session_state.setdefault('auth_mode', 'Log in')
     left, right = st.columns(2)
     if left.button('Log in', use_container_width=True, type='primary' if st.session_state.auth_mode == 'Log in' else 'secondary'):
@@ -68,19 +86,21 @@ def show_auth_gate():
     mode = st.session_state.auth_mode
     with st.form('circular_login_form' if mode == 'Log in' else 'circular_signup_form'):
         if mode == 'Sign up':
-            full_name = st.text_input('Name')
-        email = st.text_input('Email')
+            full_name = st.text_input('Name', max_chars=100)
+        email = st.text_input('Email', max_chars=254)
         if mode == 'Sign up':
-            phone = st.text_input('Phone number', placeholder='+91 98765 43210')
+            phone = st.text_input('Phone number', placeholder='+91 98765 43210', max_chars=30)
+            campus_area = st.text_input('Campus / area name', placeholder='e.g. North Campus', max_chars=120)
         password = st.text_input('Password' + (' (at least 8 characters)' if mode == 'Sign up' else ''), type='password')
         if mode == 'Sign up': confirm = st.text_input('Confirm password', type='password')
         submitted = st.form_submit_button('Log in' if mode == 'Log in' else 'Create account', use_container_width=True)
     if submitted:
         try:
-            if mode == 'Log in':
+            if not email.strip() or '@' not in email:
+                st.error('Enter a valid email address.')
+            elif mode == 'Log in':
                 result = client.auth.sign_in_with_password({'email': email.strip(), 'password': password})
-                metadata = getattr(result.user, 'user_metadata', None) or {}
-                st.session_state.auth_user = {'id': str(result.user.id), 'email': result.user.email, 'name': metadata.get('full_name') or email.split('@')[0], 'phone': metadata.get('phone'), 'metadata': metadata}
+                st.session_state.auth_user = build_auth_user(result.user, email.strip())
                 st.session_state.auth_token = result.session.access_token
                 st.rerun()
             elif password != confirm:
@@ -91,22 +111,25 @@ def show_auth_gate():
                 st.error('Enter your name.')
             elif sum(ch.isdigit() for ch in phone) < 7:
                 st.error('Enter a valid phone number.')
+            elif not campus_area.strip():
+                st.error('Enter your campus or area name.')
             else:
-                result = client.auth.sign_up({'email': email.strip(), 'password': password, 'options': {'data': {'full_name': full_name.strip(), 'phone': phone.strip()}}})
+                profile = {'full_name': full_name.strip(), 'phone': phone.strip(), 'campus_area': campus_area.strip()}
+                result = client.auth.sign_up({'email': email.strip(), 'password': password, 'options': {'data': profile}})
                 if result.session:
-                    st.session_state.auth_user = {'id': str(result.user.id), 'email': result.user.email, 'name': full_name.strip(), 'phone': phone.strip(), 'metadata': {'full_name': full_name.strip(), 'phone': phone.strip()}}
+                    st.session_state.auth_user = build_auth_user(result.user, email.strip())
                     st.session_state.auth_token = result.session.access_token
                     st.rerun()
                 else:
                     st.success('Account created. Confirm your email, then return here and log in.')
-        except Exception:
-            st.error('Authentication failed. Check your details and try again.')
+        except Exception as exc:
+            st.error(f'Authentication failed: {str(exc)[:240]}')
     st.stop()
 
 current_user = show_auth_gate()
 USER_ID = current_user['id']
 DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite'
-THEME_CSS = '<style>\n@import url(\'https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap\');\n:root{--app-bg:__PAGE__;--app-text:__TEXT__;--muted:__MUTED__;--sidebar-bg:__SIDEBAR__;--sidebar-text:__SIDEBAR_TEXT__;--sidebar-muted:__SIDEBAR_MUTED__;--panel:__PANEL__;--panel2:__PANEL2__;--border:__BORDER__;--accent:__ACCENT__;--hover:__HOVER__;--input:__INPUT__;--input-border:__INPUT_BORDER__;--hero-bg:__HERO__;--hero-border:__HERO_BORDER__;--tip-bg:__TIP__;--eyebrow:__EYEBROW__;--active-nav:__ACTIVE_NAV__;--alert-bg:__ALERT__;--scheme:__SCHEME__}\n.stApp{background:var(--app-bg);font-family:\'DM Sans\',sans-serif;color:var(--app-text);color-scheme:var(--scheme)}[data-testid="stHeader"]{background:transparent}[data-testid="stAppViewContainer"]{background:transparent}[data-testid="stMainBlockContainer"],.main .block-container{padding-top:1rem!important;margin-top:0!important}\n[data-testid="stSidebar"]{background:var(--sidebar-bg);border-right:1px solid var(--border)}[data-testid="stSidebar"] *{color:var(--sidebar-text)}[data-testid="stSidebar"] [data-testid="stSidebarHeader"]{height:2.5rem!important;min-height:2.5rem!important;max-height:2.5rem!important;flex:0 0 2.5rem!important;padding:0!important;margin:0!important}[data-testid="stSidebar"] [data-testid="stSidebarContent"],[data-testid="stSidebar"] [data-testid="stSidebarUserContent"]{padding:0!important;margin:0!important}[data-testid="stSidebar"] [data-testid="stSidebarContent"]>div{padding-top:0!important;margin-top:0!important}\n[data-testid="stSidebarCollapsedControl"] svg,[data-testid="stSidebarCollapsedControl"] button svg,[data-testid="stSidebarCollapseButton"] svg,[data-testid="stSidebarCollapseButton"] button svg,button[aria-label="Open sidebar"] svg,button[title="Open sidebar"] svg{visibility:hidden!important}[data-testid="stSidebarCollapsedControl"],button[aria-label="Open sidebar"],button[title="Open sidebar"]{position:relative!important}[data-testid="stSidebarCollapsedControl"]::after,[data-testid="stSidebarCollapsedControl"] button::after,[data-testid="stSidebarCollapseButton"]::after,[data-testid="stSidebarCollapseButton"] button::after,button[aria-label="Open sidebar"]::after,button[title="Open sidebar"]::after{content:\'\';position:absolute;width:21px;height:17px;left:50%;top:50%;transform:translate(-50%,-50%);background:linear-gradient(to bottom,var(--app-text) 0 3px,transparent 3px 7px,var(--app-text) 7px 10px,transparent 10px 14px,var(--app-text) 14px 17px);pointer-events:none}\n[data-testid="stSidebarCollapseButton"]::after,[data-testid="stSidebarCollapseButton"] button::after{content:none!important;display:none!important}\nh1,h2,h3{font-family:\'Manrope\',sans-serif!important;color:var(--app-text);letter-spacing:-.03em}h1{font-size:1.8rem!important;margin:.2rem 0 .15rem!important}h2{font-size:1.3rem!important;margin:.35rem 0 .2rem!important}h3{font-size:1rem!important;margin:.4rem 0 .2rem!important}\np,label,li,[data-testid="stCaptionContainer"]{font-size:.9rem;color:var(--muted)}\ndiv[data-testid="stMetric"]{background:var(--panel2);padding:13px 16px;border:1px solid var(--border);border-radius:15px;box-shadow:0 7px 20px #0002}div[data-testid="stMetricLabel"]{font-size:.75rem;color:var(--muted)}div[data-testid="stMetricValue"]{font-family:\'Manrope\',sans-serif;color:var(--app-text);font-size:1.55rem}\ndiv[data-testid="stVerticalBlockBorderWrapper"]{background:var(--panel);border:1px solid var(--border);border-radius:17px;box-shadow:0 8px 24px #0002}\ndiv.stButton>button,.stDownloadButton button{background:var(--panel2);border:1px solid var(--border);border-radius:11px;color:var(--app-text);font-weight:650;min-height:40px}div.stButton>button:hover,.stDownloadButton button:hover{background:var(--hover);border-color:var(--accent);color:var(--app-text)}div.stButton>button[kind="primary"]{background:var(--accent);border:0;color:white}\n[data-testid="stTextInput"] input,[data-testid="stNumberInput"] input,[data-testid="stDateInput"] input,[data-testid="stTimeInput"] input,[data-testid="stTextArea"] textarea,[data-testid="stSelectbox"] [data-baseweb="select"]>div,[data-testid="stMultiSelect"] [data-baseweb="select"]>div{background:var(--input)!important;color:var(--app-text)!important;border-color:var(--input-border)!important;border-radius:10px}\n[data-baseweb="popover"] [role="listbox"],[data-baseweb="menu"],[data-baseweb="select"]{background:var(--panel2)!important;color:var(--app-text)!important}[role="option"]{color:var(--app-text)!important}[role="option"]:hover{background:var(--hover)!important}\n[data-testid="stDataFrame"],[data-testid="stTable"],[data-testid="stExpander"]{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}\n.st-key-floating_advisor_button{position:fixed!important;right:24px!important;left:auto!important;bottom:22px!important;z-index:1000!important;width:58px!important;height:58px!important;overflow:visible!important}.st-key-floating_advisor_button::after{content:"Confused? Ask Circular AI";position:absolute;right:70px;bottom:9px;white-space:nowrap;background:#ffffff;color:#14532d;border:1px solid #86efac;border-radius:18px;padding:10px 15px;font-size:13px;font-weight:750;box-shadow:0 5px 20px #14532d26;z-index:1001;pointer-events:none}.st-key-floating_advisor_button::before{content:"";position:absolute;right:62px;bottom:22px;width:13px;height:13px;background:#ffffff;border-left:1px solid #86efac;border-bottom:1px solid #86efac;transform:rotate(45deg);z-index:1002;pointer-events:none}.st-key-floating_advisor_button button{width:58px!important;height:58px!important;min-height:58px!important;padding:0!important;border-radius:50%!important;background:linear-gradient(135deg,#b7f7c8,#4ffff)!important;color:#092014!important;border:2px solid #dcfce7!important;box-shadow:0 8px 28px #22c55e66,0 0 0 4px #22c55e22!important;font-size:27px!important;font-weight:800!important;animation:circular-pulse 2.4s ease-in-out infinite}.st-key-floating_advisor_button button:hover{transform:translateY(-3px);filter:brightness(1.04);box-shadow:0 12px 32px #22c55e88,0 0 0 5px #22c55e2b!important}@keyframes circular-pulse{0%,100%{box-shadow:0 8px 28px #22c55e55,0 0 0 3px #22c55e1c}50%{box-shadow:0 8px 30px #22c55e88,0 0 0 6px #22c55e30}}@media(max-width:480px){.st-key-floating_advisor_button{right:12px!important;bottom:12px!important}.st-key-floating_advisor_button::after{right:64px;padding:8px 11px;font-size:12px}.st-key-floating_advisor_button::before{right:56px}.st-key-floating_advisor_button button{width:50px!important;height:50px!important;min-height:50px!important;font-size:24px!important}}\n.hero{border:1px solid var(--hero-border);border-radius:20px;padding:24px 28px;background:var(--hero-bg);margin:6px 0 20px}.hero h2{font-size:25px!important;margin:0 0 5px;color:var(--app-text)}.hero p{color:var(--muted);margin:0}.eyebrow{color:var(--eyebrow);font-size:10px;letter-spacing:.14em;font-weight:700;text-transform:uppercase}.compact-page-header{margin:0 0 10px}.compact-page-header .eyebrow{margin:0 0 2px}.compact-page-header h1{font:800 1.8rem Manrope,sans-serif!important;letter-spacing:-.03em;color:var(--app-text);margin:0!important}.compact-page-header p{font-size:.9rem;color:var(--muted);margin:3px 0 0!important}.tip{background:var(--tip-bg);border:1px solid var(--border);border-left:4px solid var(--accent);padding:14px 17px;border-radius:13px;color:var(--app-text)}\n.sidebar-brand{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;width:100%;margin:0 0 18px;padding:0;text-align:center}.sidebar-brand-mark{width:32px;height:32px;display:flex;align-items:center;justify-content:center;color:#28745f;font-size:30px;line-height:1}.sidebar-brand-title{font:800 11px Manrope,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--sidebar-muted)}.main-brand{display:flex;align-items:center;justify-content:flex-start;gap:10px;margin:0 0 14px;padding:0}.main-brand-mark{width:38px;height:38px;display:flex;align-items:center;justify-content:center;color:#28745f;font-size:36px;line-height:1}.main-brand-title{font:800 23px Manrope,sans-serif;letter-spacing:.04em;color:var(--app-text)}\n[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p{color:var(--sidebar-muted);font-size:10px;letter-spacing:.15em;font-weight:700}[data-testid="stSidebar"] [role="radiogroup"]{gap:7px}[data-testid="stSidebar"] [role="radiogroup"] label{background:transparent;border-radius:11px;padding:7px 10px;transition:background .15s ease}[data-testid="stSidebar"] [role="radiogroup"] label:hover{background:#ffffff12}[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){background:var(--active-nav);box-shadow:inset 3px 0 var(--accent)}[data-testid="stSidebar"] [role="radiogroup"] label p{color:var(--sidebar-text);font-size:14px;font-weight:600;letter-spacing:0}\n\n.stProgress>div>div>div>div{background:linear-gradient(90deg,#db514d,#ef8176)}[data-testid="stAlert"]{background:var(--alert-bg);border:1px solid var(--border);color:var(--app-text)}.excel-updated-notice{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:10000;background:var(--panel2);color:var(--app-text);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:12px;padding:11px 18px;box-shadow:0 8px 26px #0004;font:600 14px \'DM Sans\',sans-serif;pointer-events:none;animation:excel-notice-fade 5s ease forwards}@keyframes excel-notice-fade{0%,100%{opacity:0;transform:translate(-50%,10px)}10%,82%{opacity:1;transform:translate(-50%,0)}}hr{border-color:var(--border)}footer{visibility:hidden}</style>'
+THEME_CSS = '<style>\n@import url(\'https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap\');\n:root{--app-bg:__PAGE__;--app-text:__TEXT__;--muted:__MUTED__;--sidebar-bg:__SIDEBAR__;--sidebar-text:__SIDEBAR_TEXT__;--sidebar-muted:__SIDEBAR_MUTED__;--panel:__PANEL__;--panel2:__PANEL2__;--border:__BORDER__;--accent:__ACCENT__;--hover:__HOVER__;--input:__INPUT__;--input-border:__INPUT_BORDER__;--hero-bg:__HERO__;--hero-border:__HERO_BORDER__;--tip-bg:__TIP__;--eyebrow:__EYEBROW__;--active-nav:__ACTIVE_NAV__;--alert-bg:__ALERT__;--scheme:__SCHEME__}\n.stApp{background:var(--app-bg);font-family:\'DM Sans\',sans-serif;color:var(--app-text);color-scheme:var(--scheme)}[data-testid="stHeader"]{background:transparent}[data-testid="stAppViewContainer"]{background:transparent}[data-testid="stMainBlockContainer"],.main .block-container{padding-top:1rem!important;margin-top:0!important}\n[data-testid="stSidebar"]{background:var(--sidebar-bg);border-right:1px solid var(--border)}[data-testid="stSidebar"] *{color:var(--sidebar-text)}[data-testid="stSidebar"] [data-testid="stSidebarHeader"]{height:2.5rem!important;min-height:2.5rem!important;max-height:2.5rem!important;flex:0 0 2.5rem!important;padding:0!important;margin:0!important}[data-testid="stSidebar"] [data-testid="stSidebarContent"],[data-testid="stSidebar"] [data-testid="stSidebarUserContent"]{padding:0!important;margin:0!important}[data-testid="stSidebar"] [data-testid="stSidebarContent"]>div{padding-top:0!important;margin-top:0!important}\n[data-testid="stSidebarCollapsedControl"] svg,[data-testid="stSidebarCollapsedControl"] button svg,[data-testid="stSidebarCollapseButton"] svg,[data-testid="stSidebarCollapseButton"] button svg,button[aria-label="Open sidebar"] svg,button[title="Open sidebar"] svg{visibility:hidden!important}[data-testid="stSidebarCollapsedControl"],button[aria-label="Open sidebar"],button[title="Open sidebar"]{position:relative!important}[data-testid="stSidebarCollapsedControl"]::after,[data-testid="stSidebarCollapsedControl"] button::after,[data-testid="stSidebarCollapseButton"]::after,[data-testid="stSidebarCollapseButton"] button::after,button[aria-label="Open sidebar"]::after,button[title="Open sidebar"]::after{content:\'\';position:absolute;width:21px;height:17px;left:50%;top:50%;transform:translate(-50%,-50%);background:linear-gradient(to bottom,var(--app-text) 0 3px,transparent 3px 7px,var(--app-text) 7px 10px,transparent 10px 14px,var(--app-text) 14px 17px);pointer-events:none}\n[data-testid="stSidebarCollapseButton"]::after,[data-testid="stSidebarCollapseButton"] button::after{content:none!important;display:none!important}\nh1,h2,h3{font-family:\'Manrope\',sans-serif!important;color:var(--app-text);letter-spacing:-.03em}h1{font-size:1.8rem!important;margin:.2rem 0 .15rem!important}h2{font-size:1.3rem!important;margin:.35rem 0 .2rem!important}h3{font-size:1rem!important;margin:.4rem 0 .2rem!important}\np,label,li,[data-testid="stCaptionContainer"]{font-size:.9rem;color:var(--muted)}\ndiv[data-testid="stMetric"]{background:var(--panel2);padding:13px 16px;border:1px solid var(--border);border-radius:15px;box-shadow:0 7px 20px #0002}div[data-testid="stMetricLabel"]{font-size:.75rem;color:var(--muted)}div[data-testid="stMetricValue"]{font-family:\'Manrope\',sans-serif;color:var(--app-text);font-size:1.55rem}\ndiv[data-testid="stVerticalBlockBorderWrapper"]{background:var(--panel);border:1px solid var(--border);border-radius:17px;box-shadow:0 8px 24px #0002}\ndiv.stButton>button,.stDownloadButton button{background:var(--panel2);border:1px solid var(--border);border-radius:11px;color:var(--app-text);font-weight:650;min-height:40px}div.stButton>button:hover,.stDownloadButton button:hover{background:var(--hover);border-color:var(--accent);color:var(--app-text)}div.stButton>button[kind="primary"]{background:var(--accent);border:0;color:white}\n[data-testid="stTextInput"] input,[data-testid="stNumberInput"] input,[data-testid="stDateInput"] input,[data-testid="stTimeInput"] input,[data-testid="stTextArea"] textarea,[data-testid="stSelectbox"] [data-baseweb="select"]>div,[data-testid="stMultiSelect"] [data-baseweb="select"]>div{background:var(--input)!important;color:var(--app-text)!important;border-color:var(--input-border)!important;border-radius:10px}\n[data-baseweb="popover"] [role="listbox"],[data-baseweb="menu"],[data-baseweb="select"]{background:var(--panel2)!important;color:var(--app-text)!important}[role="option"]{color:var(--app-text)!important}[role="option"]:hover{background:var(--hover)!important}\n[data-testid="stDataFrame"],[data-testid="stTable"],[data-testid="stExpander"]{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}\n.st-key-floating_advisor_button{position:fixed!important;right:24px!important;left:auto!important;bottom:22px!important;z-index:1000!important;width:58px!important;height:58px!important;overflow:visible!important}.st-key-floating_advisor_button::after{content:"Confused? Ask Circular AI";position:absolute;right:70px;bottom:9px;white-space:nowrap;background:#ffffff;color:#14532d;border:1px solid #86efac;border-radius:18px;padding:10px 15px;font-size:13px;font-weight:750;box-shadow:0 5px 20px #14532d26;z-index:1001;pointer-events:none}.st-key-floating_advisor_button::before{content:"";position:absolute;right:62px;bottom:22px;width:13px;height:13px;background:#ffffff;border-left:1px solid #86efac;border-bottom:1px solid #86efac;transform:rotate(45deg);z-index:1002;pointer-events:none}.st-key-floating_advisor_button button{width:58px!important;height:58px!important;min-height:58px!important;padding:0!important;border-radius:50%!important;background:linear-gradient(135deg,#b7f7c8,#4ffff)!important;color:#092014!important;border:2px solid #dcfce7!important;box-shadow:0 8px 28px #22c55e66,0 0 0 4px #22c55e22!important;font-size:27px!important;font-weight:800!important;animation:circular-pulse 2.4s ease-in-out infinite}.st-key-floating_advisor_button button:hover{transform:translateY(-3px);filter:brightness(1.04);box-shadow:0 12px 32px #22c55e88,0 0 0 5px #22c55e2b!important}@keyframes circular-pulse{0%,100%{box-shadow:0 8px 28px #22c55e55,0 0 0 3px #22c55e1c}50%{box-shadow:0 8px 30px #22c55e88,0 0 0 6px #22c55e30}}@media(max-width:480px){.st-key-floating_advisor_button{right:12px!important;bottom:12px!important}.st-key-floating_advisor_button::after{right:64px;padding:8px 11px;font-size:12px}.st-key-floating_advisor_button::before{right:56px}.st-key-floating_advisor_button button{width:50px!important;height:50px!important;min-height:50px!important;font-size:24px!important}}\n.hero{border:1px solid var(--hero-border);border-radius:20px;padding:24px 28px;background:var(--hero-bg);margin:6px 0 20px}.hero h2{font-size:25px!important;margin:0 0 5px;color:var(--app-text)}.hero p{color:var(--muted);margin:0}.eyebrow{color:var(--eyebrow);font-size:10px;letter-spacing:.14em;font-weight:700;text-transform:uppercase}.compact-page-header{margin:0 0 10px}.compact-page-header .eyebrow{margin:0 0 2px}.compact-page-header h1{font:800 1.8rem Manrope,sans-serif!important;letter-spacing:-.03em;color:var(--app-text);margin:0!important}.compact-page-header p{font-size:.9rem;color:var(--muted);margin:3px 0 0!important}.tip{background:var(--tip-bg);border:1px solid var(--border);border-left:4px solid var(--accent);padding:14px 17px;border-radius:13px;color:var(--app-text)}\n.sidebar-brand{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;width:100%;margin:0 0 18px;padding:0;text-align:center}.sidebar-brand-mark{width:32px;height:32px;display:flex;align-items:center;justify-content:center;color:#28745f;font-size:30px;line-height:1}.sidebar-brand-title{font:800 11px Manrope,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--sidebar-muted)}.main-brand{display:flex;align-items:center;justify-content:flex-start;gap:10px;margin:0 0 14px;padding:0}.main-brand-mark{width:38px;height:38px;display:flex;align-items:center;justify-content:center;color:#28745f;font-size:36px;line-height:1;animation:circular-brand-turn 1.1s ease-out 1}@keyframes circular-brand-turn{from{transform:rotate(-180deg)}to{transform:rotate(0)}}@media(prefers-reduced-motion:reduce){.main-brand-mark{animation:none!important}}.main-brand-title{font:800 23px Manrope,sans-serif;letter-spacing:.04em;color:var(--app-text)}\n[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p{color:var(--sidebar-muted);font-size:10px;letter-spacing:.15em;font-weight:700}[data-testid="stSidebar"] [role="radiogroup"]{gap:7px}[data-testid="stSidebar"] [role="radiogroup"] label{background:transparent;border-radius:11px;padding:7px 10px;transition:background .15s ease}[data-testid="stSidebar"] [role="radiogroup"] label:hover{background:#ffffff12}[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){background:var(--active-nav);box-shadow:inset 3px 0 var(--accent)}[data-testid="stSidebar"] [role="radiogroup"] label p{color:var(--sidebar-text);font-size:14px;font-weight:600;letter-spacing:0}\n\n.stProgress>div>div>div>div{background:linear-gradient(90deg,#db514d,#ef8176)}[data-testid="stAlert"]{background:var(--alert-bg);border:1px solid var(--border);color:var(--app-text)}.excel-updated-notice{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:10000;background:var(--panel2);color:var(--app-text);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:12px;padding:11px 18px;box-shadow:0 8px 26px #0004;font:600 14px \'DM Sans\',sans-serif;pointer-events:none;animation:excel-notice-fade 5s ease forwards}@keyframes excel-notice-fade{0%,100%{opacity:0;transform:translate(-50%,10px)}10%,82%{opacity:1;transform:translate(-50%,0)}}hr{border-color:var(--border)}footer{visibility:hidden}</style>'
 for token, key in {'__PAGE__': 'page', '__TEXT__': 'text', '__MUTED__': 'muted', '__SIDEBAR__': 'sidebar', '__SIDEBAR_TEXT__': 'sidebar_text', '__SIDEBAR_MUTED__': 'sidebar_muted', '__PANEL__': 'panel', '__PANEL2__': 'panel2', '__BORDER__': 'border', '__ACCENT__': 'accent', '__HOVER__': 'hover', '__INPUT__': 'input', '__INPUT_BORDER__': 'input_border', '__HERO__': 'hero', '__HERO_BORDER__': 'hero_border', '__TIP__': 'tip', '__EYEBROW__': 'eyebrow', '__ACTIVE_NAV__': 'active_nav', '__ALERT__': 'alert', '__SCHEME__': 'scheme'}.items():
     THEME_CSS = THEME_CSS.replace(token, PALETTE[key])
 st.markdown(THEME_CSS, unsafe_allow_html=True)
@@ -764,14 +787,67 @@ with st.sidebar:
     selected_nav = st.radio('Navigation', nav_labels, index=nav_labels.index(current_nav), key='sidebar_navigation', label_visibility='collapsed')
     st.session_state.page = NAV_ITEMS[selected_nav]
     st.divider()
-    st.text_input('Campus', 'ENTER COLLEGE NAME', label_visibility='collapsed')
+    campus_label = __import__('html').escape(current_user.get('campus_area') or 'Campus / area not set')
+    st.markdown(f"<div style='padding:8px 10px;margin:6px 0 10px;border:1px solid {PALETTE['border']};border-radius:10px;color:{PALETTE['sidebar_text']};font-size:13px'>📍 {campus_label}</div>", unsafe_allow_html=True)
     st.success(f"● {(st.session_state.bins.Status == 'Online').sum()} active bins")
-st.markdown('<div></div>', unsafe_allow_html=True)
-st.markdown("<div class='main-brand'><span class='main-brand-mark'>♻</span><span class='main-brand-title'>CIRCULAR</span></div>", unsafe_allow_html=True)
 page = st.session_state.page
 b = st.session_state.bins
 logs = st.session_state.logs
 events = st.session_state.events
+brand_col, account_col = st.columns([7, 2], vertical_alignment='center')
+with brand_col:
+    st.markdown("<div class='main-brand'><span class='main-brand-mark'>♻</span><span class='main-brand-title'>CIRCULAR</span></div>", unsafe_allow_html=True)
+with account_col:
+    with st.popover(f"👤 Account · {current_user.get('name') or 'Profile'}", use_container_width=True):
+        st.markdown('### Account details')
+        st.write(f"**Name:** {current_user.get('name') or '—'}")
+        st.write(f"**Email:** {current_user.get('email') or '—'}")
+        st.write(f"**Phone:** {current_user.get('phone') or '—'}")
+        st.write(f"**Campus / area:** {current_user.get('campus_area') or '—'}")
+        if current_user.get('created_at'):
+            st.caption(f"Account created · {str(current_user['created_at'])[:10]}")
+        with st.form('profile_update_form'):
+            updated_name = st.text_input('Name', value=current_user.get('name') or '', max_chars=100)
+            updated_email = st.text_input('Email', value=current_user.get('email') or '', max_chars=254)
+            updated_phone = st.text_input('Phone number', value=current_user.get('phone') or '', max_chars=30)
+            updated_campus = st.text_input('Campus / area name', value=current_user.get('campus_area') or '', max_chars=120)
+            new_password = st.text_input('New password (optional)', type='password', help='Leave blank to keep your current password.')
+            profile_submitted = st.form_submit_button('Save changes', use_container_width=True)
+        if profile_submitted:
+            if not updated_name.strip() or not updated_email.strip() or '@' not in updated_email:
+                st.error('Enter a name and valid email address.')
+            elif not updated_campus.strip():
+                st.error('Enter your campus or area name.')
+            elif new_password and len(new_password) < 8:
+                st.error('A new password must be at least 8 characters.')
+            else:
+                try:
+                    profile = {'full_name': updated_name.strip(), 'phone': updated_phone.strip(), 'campus_area': updated_campus.strip()}
+                    attributes = {'data': profile}
+                    email_changed = updated_email.strip().casefold() != str(current_user.get('email') or '').casefold()
+                    if email_changed:
+                        attributes['email'] = updated_email.strip()
+                    if new_password:
+                        attributes['password'] = new_password
+                    result = get_supabase_client().auth.update_user(attributes)
+                    updated_user = build_auth_user(result.user, current_user.get('email', ''))
+                    if email_changed and updated_user.get('email', '').casefold() != updated_email.strip().casefold():
+                        st.session_state.profile_update_notice = 'Profile saved. Confirm the email change using the message sent by Supabase.'
+                    else:
+                        st.session_state.profile_update_notice = 'Account details updated.'
+                    st.session_state.auth_user = updated_user
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f'Could not update your account: {str(exc)[:240]}')
+        if st.button('Logout', key='account_logout', use_container_width=True):
+            try:
+                get_supabase_client().auth.sign_out()
+            finally:
+                for state_key in list(st.session_state.keys()):
+                    del st.session_state[state_key]
+                st.rerun()
+if st.session_state.get('profile_update_notice'):
+    st.toast(st.session_state.pop('profile_update_notice'), icon='✅')
 if page == 'Overview':
     st.markdown("<div class='hero'><div class='eyebrow'>SMARTER SORTING · CLEANER CAMPUS</div><h2>A live view of your circular campus.</h2><p>Track disposal, fullness, pickups, and waste-reduction habits.</p></div>", unsafe_allow_html=True)
     a, c, d, e = st.columns(4)
