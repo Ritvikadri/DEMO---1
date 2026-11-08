@@ -817,7 +817,7 @@ brand_col, account_col = st.columns([7, 2], vertical_alignment='center')
 with brand_col:
     st.markdown("<div class='main-brand'><span class='main-brand-mark'>♻</span><span class='main-brand-title'>CIRCULAR</span></div>", unsafe_allow_html=True)
 with account_col:
-    with st.popover(f"👤 Account · {current_user.get('name') or 'Profile'}", use_container_width=True):
+    with st.popover(f"Account  ·  {current_user.get('name') or 'Profile'}", use_container_width=True):
         if current_user.get('created_at'):
             st.caption(f"Account created · {str(current_user['created_at'])[:10]}")
         with st.form('profile_update_form'):
