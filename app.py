@@ -818,11 +818,6 @@ with brand_col:
     st.markdown("<div class='main-brand'><span class='main-brand-mark'>♻</span><span class='main-brand-title'>CIRCULAR</span></div>", unsafe_allow_html=True)
 with account_col:
     with st.popover(f"👤 Account · {current_user.get('name') or 'Profile'}", use_container_width=True):
-        st.markdown('### Account details')
-        st.write(f"**Name:** {current_user.get('name') or '—'}")
-        st.write(f"**Email:** {current_user.get('email') or '—'}")
-        st.write(f"**Phone:** {current_user.get('phone') or '—'}")
-        st.write(f"**Campus / area:** {current_user.get('campus_area') or '—'}")
         if current_user.get('created_at'):
             st.caption(f"Account created · {str(current_user['created_at'])[:10]}")
         with st.form('profile_update_form'):
