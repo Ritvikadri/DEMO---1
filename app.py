@@ -42,6 +42,25 @@ def get_supabase_client():
         client.postgrest.auth(token)
     return client
 
+def get_camera_rtc_configuration():
+    """Configure STUN by default and optional TURN from private app secrets."""
+    ice_servers = [
+        {'urls': ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302']}
+    ]
+    try:
+        turn_urls = st.secrets.get('WEBRTC_TURN_URLS', [])
+        if isinstance(turn_urls, str):
+            turn_urls = [url.strip() for url in turn_urls.split(',') if url.strip()]
+        username = st.secrets.get('WEBRTC_TURN_USERNAME', '')
+        credential = st.secrets.get('WEBRTC_TURN_CREDENTIAL', '')
+        if turn_urls and username and credential:
+            ice_servers.append({'urls': list(turn_urls), 'username': username, 'credential': credential})
+    except Exception:
+        # STUN remains available if TURN has not been configured in Streamlit secrets.
+        pass
+    return {'iceServers': ice_servers}
+
+
 def build_auth_user(user, fallback_email=''):
     'Keep the signed-in profile fields in a consistent shape.'
     metadata = getattr(user, 'user_metadata', None) or {}
@@ -904,7 +923,7 @@ elif page == 'Live sorting':
                 ctx = None
             else:
                 selected_camera_bin = st.selectbox('Sorting location / bin', b['Bin ID'].astype(str).tolist(), format_func=lambda key: f"{key} · {b.loc[b['Bin ID'].astype(str) == key, 'Name'].iloc[0]} · {b.loc[b['Bin ID'].astype(str) == key, 'Category'].iloc[0]}", key='live_sorting_camera_bin', help='Choose the bin location associated with this camera session. Each bin selection has its own camera component.')
-                ctx = webrtc_streamer(key=f'circular-waste-camera-{selected_camera_bin}', video_processor_factory=LatestFrame, media_stream_constraints={'video': True, 'audio': False}, async_processing=True)
+                ctx = webrtc_streamer(key=f'circular-waste-camera-{selected_camera_bin}', video_processor_factory=LatestFrame, rtc_configuration=get_camera_rtc_configuration(), media_stream_constraints={'video': True, 'audio': False}, async_processing=True)
             st.session_state.live_camera_context = ctx
             voice_assistant = st.toggle('Voice assistant', value=st.session_state.voice_assistant_on, key='voice_assistant_on', help='When enabled, speak camera classifications and AI answers in your browser. Uses browser speech; Gemini is used only for classifications and answers.')
             has_key = bool(gemini_api_key())
